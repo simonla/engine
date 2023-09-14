@@ -4,11 +4,13 @@
 
 #include "flutter/lib/ui/painting/multi_frame_codec.h"
 
+#include <optional>
 #include <utility>
 
 #include "flutter/fml/make_copyable.h"
 #include "flutter/lib/ui/painting/display_list_image_gpu.h"
 #include "flutter/lib/ui/painting/image.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #if IMPELLER_SUPPORTS_RENDERING
 #include "flutter/lib/ui/painting/image_decoder_impeller.h"
 #endif  // IMPELLER_SUPPORTS_RENDERING
@@ -53,12 +55,8 @@ static void InvokeNextFrameCallback(
                      tonic::ToDart(decode_error)});
 }
 
-std::pair<sk_sp<DlImage>, std::string>
-MultiFrameCodec::State::GetNextFrameImage(
-    fml::WeakPtr<GrDirectContext> resourceContext,
-    const std::shared_ptr<const fml::SyncSwitch>& gpu_disable_sync_switch,
-    const std::shared_ptr<impeller::Context>& impeller_context,
-    fml::RefPtr<flutter::SkiaUnrefQueue> unref_queue) {
+std::pair<std::optional<SkBitmap>, std::string>
+MultiFrameCodec::State::DecodeImage() {
   SkBitmap bitmap = SkBitmap();
   SkImageInfo info = generator_->GetInfo().makeColorType(kN32_SkColorType);
   if (info.alphaType() == kUnpremul_SkAlphaType) {
@@ -71,7 +69,7 @@ MultiFrameCodec::State::GetNextFrameImage(
          << info.computeMinByteSize() << "B";
     std::string decode_error = ostr.str();
     FML_LOG(ERROR) << decode_error;
-    return std::make_pair(nullptr, decode_error);
+    return std::make_pair(std::nullopt, decode_error);
   }
 
   ImageGenerator::FrameInfo frameInfo =
@@ -107,7 +105,7 @@ MultiFrameCodec::State::GetNextFrameImage(
     ostr << "Could not getPixels for frame " << nextFrameIndex_;
     std::string decode_error = ostr.str();
     FML_LOG(ERROR) << decode_error;
-    return std::make_pair(nullptr, decode_error);
+    return std::make_pair(std::nullopt, decode_error);
   }
 
   const bool keep_current_frame =
@@ -132,7 +130,6 @@ MultiFrameCodec::State::GetNextFrameImage(
     // Replace the stored frame. The `lastRequiredFrame_` will get used as the
     // starting backdrop for the next frame.
     lastRequiredFrame_ = bitmap;
-    lastRequiredFrameIndex_ = nextFrameIndex_;
   }
 
   if (frameInfo.disposal_method ==
@@ -141,7 +138,16 @@ MultiFrameCodec::State::GetNextFrameImage(
   } else {
     restoreBGColorRect_.reset();
   }
+  return std::make_pair(std::move(bitmap), std::string());
+}
 
+std::pair<sk_sp<DlImage>, std::string>
+MultiFrameCodec::State::GetNextFrameImage(
+    SkBitmap bitmap,
+    fml::WeakPtr<GrDirectContext> resourceContext,
+    const std::shared_ptr<const fml::SyncSwitch>& gpu_disable_sync_switch,
+    const std::shared_ptr<impeller::Context>& impeller_context,
+    fml::RefPtr<flutter::SkiaUnrefQueue> unref_queue) {
 #if IMPELLER_SUPPORTS_RENDERING
   if (is_impeller_enabled_) {
     // This is safe regardless of whether the GPU is available or not because
@@ -189,11 +195,19 @@ void MultiFrameCodec::State::GetNextFrameAndInvokeCallback(
     const std::shared_ptr<impeller::Context>& impeller_context) {
   fml::RefPtr<CanvasImage> image = nullptr;
   int duration = 0;
-  sk_sp<DlImage> dlImage;
   std::string decode_error;
-  std::tie(dlImage, decode_error) =
-      GetNextFrameImage(std::move(resourceContext), gpu_disable_sync_switch,
-                        impeller_context, std::move(unref_queue));
+  sk_sp<DlImage> dlImage;
+  {
+    std::optional<SkBitmap> sk_image_optional;
+    std::tie(sk_image_optional, decode_error) = DecodeImage();
+    if (sk_image_optional) {
+      SkBitmap bitmap = sk_image_optional.value();
+      std::tie(dlImage, decode_error) = GetNextFrameImage(
+          std::move(*sk_image_optional), std::move(resourceContext),
+          gpu_disable_sync_switch, impeller_context, std::move(unref_queue));
+    }
+  }
+
   if (dlImage) {
     image = CanvasImage::Create();
     image->set_image(dlImage);

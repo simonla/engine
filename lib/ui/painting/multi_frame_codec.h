@@ -54,18 +54,19 @@ class MultiFrameCodec : public Codec {
     int nextFrameIndex_;
     // The last decoded frame that's required to decode any subsequent frames.
     std::optional<SkBitmap> lastRequiredFrame_;
-    // The index of the last decoded required frame.
-    int lastRequiredFrameIndex_ = -1;
 
     // The rectangle that should be cleared if the previous frame's disposal
     // method was kRestoreBGColor.
     std::optional<SkIRect> restoreBGColorRect_;
 
     std::pair<sk_sp<DlImage>, std::string> GetNextFrameImage(
+        SkBitmap bitmap,
         fml::WeakPtr<GrDirectContext> resourceContext,
         const std::shared_ptr<const fml::SyncSwitch>& gpu_disable_sync_switch,
         const std::shared_ptr<impeller::Context>& impeller_context,
         fml::RefPtr<flutter::SkiaUnrefQueue> unref_queue);
+
+    std::pair<std::optional<SkBitmap>, std::string> DecodeImage();
 
     void GetNextFrameAndInvokeCallback(
         std::unique_ptr<DartPersistentValue> callback,
