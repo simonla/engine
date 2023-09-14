@@ -40,8 +40,7 @@ static void InvokeNextFrameCallback(
     const fml::RefPtr<CanvasImage>& image,
     int duration,
     const std::string& decode_error,
-    std::unique_ptr<DartPersistentValue> callback,
-    size_t trace_id) {
+    std::unique_ptr<DartPersistentValue> callback) {
   std::shared_ptr<tonic::DartState> dart_state = callback->dart_state().lock();
   if (!dart_state) {
     FML_DLOG(ERROR) << "Could not acquire Dart state while attempting to fire "
@@ -187,7 +186,6 @@ void MultiFrameCodec::State::GetNextFrameAndInvokeCallback(
     fml::WeakPtr<GrDirectContext> resourceContext,
     fml::RefPtr<flutter::SkiaUnrefQueue> unref_queue,
     const std::shared_ptr<const fml::SyncSwitch>& gpu_disable_sync_switch,
-    size_t trace_id,
     const std::shared_ptr<impeller::Context>& impeller_context) {
   fml::RefPtr<CanvasImage> image = nullptr;
   int duration = 0;
@@ -209,16 +207,13 @@ void MultiFrameCodec::State::GetNextFrameAndInvokeCallback(
   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   ui_task_runner->PostTask(fml::MakeCopyable(
       [callback = std::move(callback), image = std::move(image),
-       decode_error = std::move(decode_error), duration, trace_id]() mutable {
+       decode_error = std::move(decode_error), duration]() mutable {
         InvokeNextFrameCallback(image, duration, decode_error,
-                                std::move(callback), trace_id);
+                                std::move(callback));
       }));
 }
 
 Dart_Handle MultiFrameCodec::getNextFrame(Dart_Handle callback_handle) {
-  static size_t trace_counter = 1;
-  const size_t trace_id = trace_counter++;
-
   if (!Dart_IsClosure(callback_handle)) {
     return tonic::ToDart("Callback must be a function");
   }
@@ -231,11 +226,11 @@ Dart_Handle MultiFrameCodec::getNextFrame(Dart_Handle callback_handle) {
     std::string decode_error("Could not provide any frame.");
     FML_LOG(ERROR) << decode_error;
     task_runners.GetUITaskRunner()->PostTask(fml::MakeCopyable(
-        [trace_id, decode_error = std::move(decode_error),
+        [decode_error = std::move(decode_error),
          callback = std::make_unique<DartPersistentValue>(
              tonic::DartState::Current(), callback_handle)]() mutable {
-          InvokeNextFrameCallback(nullptr, 0, decode_error, std::move(callback),
-                                  trace_id);
+          InvokeNextFrameCallback(nullptr, 0, decode_error,
+                                  std::move(callback));
         }));
     return Dart_Null();
   }
@@ -243,7 +238,7 @@ Dart_Handle MultiFrameCodec::getNextFrame(Dart_Handle callback_handle) {
   task_runners.GetIOTaskRunner()->PostTask(fml::MakeCopyable(
       [callback = std::make_unique<DartPersistentValue>(
            tonic::DartState::Current(), callback_handle),
-       weak_state = std::weak_ptr<MultiFrameCodec::State>(state_), trace_id,
+       weak_state = std::weak_ptr<MultiFrameCodec::State>(state_),
        ui_task_runner = task_runners.GetUITaskRunner(),
        io_manager = dart_state->GetIOManager()]() mutable {
         auto state = weak_state.lock();
@@ -255,7 +250,7 @@ Dart_Handle MultiFrameCodec::getNextFrame(Dart_Handle callback_handle) {
         state->GetNextFrameAndInvokeCallback(
             std::move(callback), ui_task_runner,
             io_manager->GetResourceContext(), io_manager->GetSkiaUnrefQueue(),
-            io_manager->GetIsGpuDisabledSyncSwitch(), trace_id,
+            io_manager->GetIsGpuDisabledSyncSwitch(),
             io_manager->GetImpellerContext());
       }));
 

@@ -73,7 +73,6 @@ class MultiFrameCodec : public Codec {
         fml::WeakPtr<GrDirectContext> resourceContext,
         fml::RefPtr<flutter::SkiaUnrefQueue> unref_queue,
         const std::shared_ptr<const fml::SyncSwitch>& gpu_disable_sync_switch,
-        size_t trace_id,
         const std::shared_ptr<impeller::Context>& impeller_context);
   };
 
