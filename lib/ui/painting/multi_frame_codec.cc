@@ -68,92 +68,103 @@ void MultiFrameCodec::State::DecodeNextFrame(
           std::invoke(callback, std::move(bitmap), std::move(decode_error));
         });
   };
+  decoder_thread_.GetTaskRunner()->PostTask(
+      [self = shared_from_this(),
+       callback_on_io_thread = std::move(callback_on_io_thread)]() mutable {
+        SkBitmap bitmap = SkBitmap();
+        SkImageInfo info =
+            self->generator_->GetInfo().makeColorType(kN32_SkColorType);
+        if (info.alphaType() == kUnpremul_SkAlphaType) {
+          SkImageInfo updated = info.makeAlphaType(kPremul_SkAlphaType);
+          info = updated;
+        }
+        if (!bitmap.tryAllocPixels(info)) {
+          std::ostringstream ostr;
+          ostr << "Failed to allocate memory for bitmap of size "
+               << info.computeMinByteSize() << "B";
+          std::string decode_error = ostr.str();
+          FML_LOG(ERROR) << decode_error;
 
-  SkBitmap bitmap = SkBitmap();
-  SkImageInfo info = generator_->GetInfo().makeColorType(kN32_SkColorType);
-  if (info.alphaType() == kUnpremul_SkAlphaType) {
-    SkImageInfo updated = info.makeAlphaType(kPremul_SkAlphaType);
-    info = updated;
-  }
-  if (!bitmap.tryAllocPixels(info)) {
-    std::ostringstream ostr;
-    ostr << "Failed to allocate memory for bitmap of size "
-         << info.computeMinByteSize() << "B";
-    std::string decode_error = ostr.str();
-    FML_LOG(ERROR) << decode_error;
+          std::invoke(callback_on_io_thread, std::nullopt, decode_error);
+          return;
+        }
 
-    std::invoke(callback_on_io_thread, std::nullopt, decode_error);
-    return;
-  }
+        ImageGenerator::FrameInfo frameInfo =
+            self->generator_->GetFrameInfo(self->nextFrameIndex_);
 
-  ImageGenerator::FrameInfo frameInfo =
-      generator_->GetFrameInfo(nextFrameIndex_);
+        const int requiredFrameIndex =
+            frameInfo.required_frame.value_or(SkCodec::kNoFrame);
 
-  const int requiredFrameIndex =
-      frameInfo.required_frame.value_or(SkCodec::kNoFrame);
+        if (requiredFrameIndex != SkCodec::kNoFrame) {
+          // We are here when the frame said |disposal_method| is
+          // `DisposalMethod::kKeep` or `DisposalMethod::kRestorePrevious` and
+          // |requiredFrameIndex| is set to ex-frame or ex-ex-frame.
+          if (!self->lastRequiredFrame_.has_value()) {
+            FML_DLOG(INFO) << "Frame " << self->nextFrameIndex_
+                           << " depends on frame " << requiredFrameIndex
+                           << " and no required frames are cached. Using blank "
+                              "slate instead.";
+          } else {
+            // Copy the previous frame's output buffer into the current frame as
+            // the starting point.
+            bitmap.writePixels(self->lastRequiredFrame_->pixmap());
+            if (self->restoreBGColorRect_.has_value()) {
+              bitmap.erase(SK_ColorTRANSPARENT,
+                           self->restoreBGColorRect_.value());
+            }
+          }
+        }
 
-  if (requiredFrameIndex != SkCodec::kNoFrame) {
-    // We are here when the frame said |disposal_method| is
-    // `DisposalMethod::kKeep` or `DisposalMethod::kRestorePrevious` and
-    // |requiredFrameIndex| is set to ex-frame or ex-ex-frame.
-    if (!lastRequiredFrame_.has_value()) {
-      FML_DLOG(INFO)
-          << "Frame " << nextFrameIndex_ << " depends on frame "
-          << requiredFrameIndex
-          << " and no required frames are cached. Using blank slate instead.";
-    } else {
-      // Copy the previous frame's output buffer into the current frame as the
-      // starting point.
-      bitmap.writePixels(lastRequiredFrame_->pixmap());
-      if (restoreBGColorRect_.has_value()) {
-        bitmap.erase(SK_ColorTRANSPARENT, restoreBGColorRect_.value());
-      }
-    }
-  }
+        // Write the new frame to the output buffer. The bitmap pixels as
+        // supplied are already set in accordance with the previous frame's
+        // disposal policy.
+        if (!self->generator_->GetPixels(
+                info, bitmap.getPixels(), bitmap.rowBytes(),
+                self->nextFrameIndex_, requiredFrameIndex)) {
+          std::ostringstream ostr;
+          ostr << "Could not getPixels for frame " << self->nextFrameIndex_;
+          std::string decode_error = ostr.str();
+          FML_LOG(ERROR) << decode_error;
+          std::invoke(callback_on_io_thread, std::nullopt, decode_error);
+          return;
+        }
 
-  // Write the new frame to the output buffer. The bitmap pixels as supplied
-  // are already set in accordance with the previous frame's disposal policy.
-  if (!generator_->GetPixels(info, bitmap.getPixels(), bitmap.rowBytes(),
-                             nextFrameIndex_, requiredFrameIndex)) {
-    std::ostringstream ostr;
-    ostr << "Could not getPixels for frame " << nextFrameIndex_;
-    std::string decode_error = ostr.str();
-    FML_LOG(ERROR) << decode_error;
-    std::invoke(callback_on_io_thread, std::nullopt, decode_error);
-    return;
-  }
+        const bool keep_current_frame = frameInfo.disposal_method ==
+                                        SkCodecAnimation::DisposalMethod::kKeep;
+        const bool restore_previous_frame =
+            frameInfo.disposal_method ==
+            SkCodecAnimation::DisposalMethod::kRestorePrevious;
+        const bool previous_frame_available =
+            self->lastRequiredFrame_.has_value();
 
-  const bool keep_current_frame =
-      frameInfo.disposal_method == SkCodecAnimation::DisposalMethod::kKeep;
-  const bool restore_previous_frame =
-      frameInfo.disposal_method ==
-      SkCodecAnimation::DisposalMethod::kRestorePrevious;
-  const bool previous_frame_available = lastRequiredFrame_.has_value();
+        // Store the current frame in `lastRequiredFrame_` if the frame's
+        // disposal method indicates we should do so.
+        // * When the disposal method is "Keep", the stored frame should always
+        // be
+        //   overwritten with the new frame we just crafted.
+        // * When the disposal method is "RestorePrevious", the previously
+        // stored
+        //   frame should be retained and used as the backdrop for the next
+        //   frame again. If there isn't already a stored frame, that means we
+        //   haven't rendered any frames yet! When this happens, we just fall
+        //   back to "Keep" behavior and store the current frame as the backdrop
+        //   of the next frame.
 
-  // Store the current frame in `lastRequiredFrame_` if the frame's disposal
-  // method indicates we should do so.
-  // * When the disposal method is "Keep", the stored frame should always be
-  //   overwritten with the new frame we just crafted.
-  // * When the disposal method is "RestorePrevious", the previously stored
-  //   frame should be retained and used as the backdrop for the next frame
-  //   again. If there isn't already a stored frame, that means we haven't
-  //   rendered any frames yet! When this happens, we just fall back to "Keep"
-  //   behavior and store the current frame as the backdrop of the next frame.
+        if (keep_current_frame ||
+            (previous_frame_available && !restore_previous_frame)) {
+          // Replace the stored frame. The `lastRequiredFrame_` will get used as
+          // the starting backdrop for the next frame.
+          self->lastRequiredFrame_ = bitmap;
+        }
 
-  if (keep_current_frame ||
-      (previous_frame_available && !restore_previous_frame)) {
-    // Replace the stored frame. The `lastRequiredFrame_` will get used as the
-    // starting backdrop for the next frame.
-    lastRequiredFrame_ = bitmap;
-  }
-
-  if (frameInfo.disposal_method ==
-      SkCodecAnimation::DisposalMethod::kRestoreBGColor) {
-    restoreBGColorRect_ = frameInfo.disposal_rect;
-  } else {
-    restoreBGColorRect_.reset();
-  }
-  std::invoke(callback_on_io_thread, std::move(bitmap), std::string());
+        if (frameInfo.disposal_method ==
+            SkCodecAnimation::DisposalMethod::kRestoreBGColor) {
+          self->restoreBGColorRect_ = frameInfo.disposal_rect;
+        } else {
+          self->restoreBGColorRect_.reset();
+        }
+        std::invoke(callback_on_io_thread, std::move(bitmap), std::string());
+      });
 }
 
 std::pair<sk_sp<DlImage>, std::string>

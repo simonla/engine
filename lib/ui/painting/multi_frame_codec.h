@@ -5,12 +5,13 @@
 #ifndef FLUTTER_LIB_UI_PAINTING_MUTLI_FRAME_CODEC_H_
 #define FLUTTER_LIB_UI_PAINTING_MUTLI_FRAME_CODEC_H_
 
-#include "flutter/fml/macros.h"
+#include "flutter/fml/thread.h"
 #include "flutter/lib/ui/painting/codec.h"
 #include "flutter/lib/ui/painting/image_generator.h"
 
 #include <functional>
 #include <memory>
+#include <string>
 #include <utility>
 
 using tonic::DartPersistentValue;
@@ -69,7 +70,7 @@ class MultiFrameCodec : public Codec {
         std::function<void(std::optional<SkBitmap>, std::string)>;
 
     void DecodeNextFrame(const fml::RefPtr<fml::TaskRunner>& io_task_runner,
-                     DecodeCallback callback);
+                         DecodeCallback callback);
 
     void GetNextFrameAndInvokeCallback(
         std::unique_ptr<DartPersistentValue> callback,
@@ -82,6 +83,8 @@ class MultiFrameCodec : public Codec {
         sk_sp<DlImage> dl_image,
         std::string decode_error,
         std::unique_ptr<DartPersistentValue> callback);
+
+    fml::Thread decoder_thread_{"decode_thread"};
   };
 
   // Shared across the UI and IO task runners.
