@@ -168,17 +168,11 @@ void MultiFrameCodec::State::DecodeNextFrame(
 
 std::pair<sk_sp<DlImage>, std::string>
 MultiFrameCodec::State::GetNextFrameImage(
-    SkBitmap bitmap,
-    const fml::WeakPtr<IOManager>& io_manager) const {
-  fml::WeakPtr<GrDirectContext> resourceContext =
-      io_manager->GetResourceContext();
-  fml::RefPtr<flutter::SkiaUnrefQueue> unref_queue =
-      io_manager->GetSkiaUnrefQueue();
-  const std::shared_ptr<const fml::SyncSwitch>& gpu_disable_sync_switch =
-      io_manager->GetIsGpuDisabledSyncSwitch();
-  const std::shared_ptr<impeller::Context>& impeller_context =
-      io_manager->GetImpellerContext();
-
+    fml::WeakPtr<GrDirectContext> resourceContext,
+    fml::RefPtr<flutter::SkiaUnrefQueue> unref_queue,
+    const std::shared_ptr<const fml::SyncSwitch>& gpu_disable_sync_switch,
+    const std::shared_ptr<impeller::Context>& impeller_context,
+    SkBitmap bitmap) const {
 #if IMPELLER_SUPPORTS_RENDERING
   if (is_impeller_enabled_) {
     // This is safe regardless of whether the GPU is available or not because
@@ -219,26 +213,33 @@ MultiFrameCodec::State::GetNextFrameImage(
 }
 
 void MultiFrameCodec::State::GetNextFrameAndInvokeCallback(
-    std::unique_ptr<DartPersistentValue> callback,
     const fml::RefPtr<fml::TaskRunner>& ui_task_runner,
     const fml::RefPtr<fml::TaskRunner>& io_task_runner,
-    const fml::WeakPtr<IOManager>& io_manager) {
+    fml::WeakPtr<GrDirectContext> resourceContext,
+    fml::RefPtr<flutter::SkiaUnrefQueue> unref_queue,
+    const std::shared_ptr<const fml::SyncSwitch>& gpu_disable_sync_switch,
+    const std::shared_ptr<impeller::Context>& impeller_context,
+    std::unique_ptr<DartPersistentValue> callback) {
   DecodeNextFrame(
       io_task_runner,
-      fml::MakeCopyable([callback = std::move(callback),
-                         self = shared_from_this(), io_manager, ui_task_runner](
-                            std::optional<SkBitmap> sk_bitmap_optional,
-                            std::string decode_error) mutable {
-        sk_sp<DlImage> dl_image;
-        if (sk_bitmap_optional) {
-          std::tie(dl_image, decode_error) = self->GetNextFrameImage(
-              std::move(*sk_bitmap_optional), io_manager);
-        }
+      fml::MakeCopyable(
+          [callback = std::move(callback), self = shared_from_this(),
+           ui_task_runner, resourceContext = std::move(resourceContext),
+           unref_queue = std::move(unref_queue), gpu_disable_sync_switch,
+           impeller_context](std::optional<SkBitmap> sk_bitmap_optional,
+                             std::string decode_error) mutable {
+            sk_sp<DlImage> dl_image;
+            if (sk_bitmap_optional) {
+              std::tie(dl_image, decode_error) = self->GetNextFrameImage(
+                  std::move(resourceContext), std::move(unref_queue),
+                  gpu_disable_sync_switch, impeller_context,
+                  std::move(*sk_bitmap_optional));
+            }
 
-        self->OnGetImageAndInvokeCallback(ui_task_runner, std::move(dl_image),
-                                          std::move(decode_error),
-                                          std::move(callback));
-      }));
+            self->OnGetImageAndInvokeCallback(
+                ui_task_runner, std::move(dl_image), std::move(decode_error),
+                std::move(callback));
+          }));
 }
 
 void MultiFrameCodec::State::OnGetImageAndInvokeCallback(
@@ -303,7 +304,10 @@ Dart_Handle MultiFrameCodec::getNextFrame(Dart_Handle callback_handle) {
           return;
         }
         state->GetNextFrameAndInvokeCallback(
-            std::move(callback), ui_task_runner, io_task_runner, io_manager);
+            ui_task_runner, io_task_runner, io_manager->GetResourceContext(),
+            io_manager->GetSkiaUnrefQueue(),
+            io_manager->GetIsGpuDisabledSyncSwitch(),
+            io_manager->GetImpellerContext(), std::move(callback));
       }));
 
   return Dart_Null();

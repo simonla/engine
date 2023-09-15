@@ -63,8 +63,11 @@ class MultiFrameCodec : public Codec {
     std::optional<SkIRect> restoreBGColorRect_;
 
     [[nodiscard]] std::pair<sk_sp<DlImage>, std::string> GetNextFrameImage(
-        SkBitmap bitmap,
-        const fml::WeakPtr<IOManager>& io_manager) const;
+        fml::WeakPtr<GrDirectContext> resourceContext,
+        fml::RefPtr<flutter::SkiaUnrefQueue> unref_queue,
+        const std::shared_ptr<const fml::SyncSwitch>& gpu_disable_sync_switch,
+        const std::shared_ptr<impeller::Context>& impeller_context,
+        SkBitmap bitmap) const;
 
     using DecodeCallback =
         std::function<void(std::optional<SkBitmap>, std::string)>;
@@ -73,10 +76,13 @@ class MultiFrameCodec : public Codec {
                          DecodeCallback callback);
 
     void GetNextFrameAndInvokeCallback(
-        std::unique_ptr<DartPersistentValue> callback,
         const fml::RefPtr<fml::TaskRunner>& ui_task_runner,
         const fml::RefPtr<fml::TaskRunner>& io_task_runner,
-        const fml::WeakPtr<IOManager>& io_manager);
+        fml::WeakPtr<GrDirectContext> resourceContext,
+        fml::RefPtr<flutter::SkiaUnrefQueue> unref_queue,
+        const std::shared_ptr<const fml::SyncSwitch>& gpu_disable_sync_switch,
+        const std::shared_ptr<impeller::Context>& impeller_context,
+        std::unique_ptr<DartPersistentValue> callback);
 
     void OnGetImageAndInvokeCallback(
         const fml::RefPtr<fml::TaskRunner>& ui_task_runner,
