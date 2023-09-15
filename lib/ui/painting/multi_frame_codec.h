@@ -9,6 +9,8 @@
 #include "flutter/lib/ui/painting/codec.h"
 #include "flutter/lib/ui/painting/image_generator.h"
 
+#include <functional>
+#include <memory>
 #include <utility>
 
 using tonic::DartPersistentValue;
@@ -40,7 +42,7 @@ class MultiFrameCodec : public Codec {
   // Instead, the MultiFrameCodec creates this object when it is constructed,
   // shares it with the IO task runner's decoding work, and sets the live_
   // member to false when it is destructed.
-  struct State {
+  struct State : public std::enable_shared_from_this<State> {
     explicit State(std::shared_ptr<ImageGenerator> generator);
 
     const std::shared_ptr<ImageGenerator> generator_;
@@ -59,22 +61,27 @@ class MultiFrameCodec : public Codec {
     // method was kRestoreBGColor.
     std::optional<SkIRect> restoreBGColorRect_;
 
-    std::pair<sk_sp<DlImage>, std::string> GetNextFrameImage(
+    [[nodiscard]] std::pair<sk_sp<DlImage>, std::string> GetNextFrameImage(
         SkBitmap bitmap,
-        fml::WeakPtr<GrDirectContext> resourceContext,
-        const std::shared_ptr<const fml::SyncSwitch>& gpu_disable_sync_switch,
-        const std::shared_ptr<impeller::Context>& impeller_context,
-        fml::RefPtr<flutter::SkiaUnrefQueue> unref_queue);
+        const fml::WeakPtr<IOManager>& io_manager) const;
 
-    std::pair<std::optional<SkBitmap>, std::string> DecodeImage();
+    using DecodeCallback =
+        std::function<void(std::optional<SkBitmap>, std::string)>;
+
+    void DecodeImage(const fml::RefPtr<fml::TaskRunner>& io_task_runner,
+                     DecodeCallback callback);
 
     void GetNextFrameAndInvokeCallback(
         std::unique_ptr<DartPersistentValue> callback,
         const fml::RefPtr<fml::TaskRunner>& ui_task_runner,
-        fml::WeakPtr<GrDirectContext> resourceContext,
-        fml::RefPtr<flutter::SkiaUnrefQueue> unref_queue,
-        const std::shared_ptr<const fml::SyncSwitch>& gpu_disable_sync_switch,
-        const std::shared_ptr<impeller::Context>& impeller_context);
+        const fml::RefPtr<fml::TaskRunner>& io_task_runner,
+        const fml::WeakPtr<IOManager>& io_manager);
+
+    void OnGetImageAndInvokeCallback(
+        const fml::RefPtr<fml::TaskRunner>& ui_task_runner,
+        sk_sp<DlImage> dl_image,
+        std::string decode_error,
+        std::unique_ptr<DartPersistentValue> callback);
   };
 
   // Shared across the UI and IO task runners.
