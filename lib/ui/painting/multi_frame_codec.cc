@@ -7,7 +7,6 @@
 #include <optional>
 #include <utility>
 
-#include "common/task_runners.h"
 #include "flutter/fml/make_copyable.h"
 #include "flutter/lib/ui/painting/display_list_image_gpu.h"
 #include "flutter/lib/ui/painting/image.h"
