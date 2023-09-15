@@ -56,7 +56,7 @@ static void InvokeNextFrameCallback(
                      tonic::ToDart(decode_error)});
 }
 
-void MultiFrameCodec::State::DecodeImage(
+void MultiFrameCodec::State::DecodeNextFrame(
     const fml::RefPtr<fml::TaskRunner>& io_task_runner,
     DecodeCallback callback) {
   auto callback_on_io_thread = [callback = std::move(callback), io_task_runner](
@@ -212,7 +212,7 @@ void MultiFrameCodec::State::GetNextFrameAndInvokeCallback(
     const fml::RefPtr<fml::TaskRunner>& ui_task_runner,
     const fml::RefPtr<fml::TaskRunner>& io_task_runner,
     const fml::WeakPtr<IOManager>& io_manager) {
-  DecodeImage(
+  DecodeNextFrame(
       io_task_runner,
       fml::MakeCopyable([callback = std::move(callback),
                          self = shared_from_this(), io_manager, ui_task_runner](

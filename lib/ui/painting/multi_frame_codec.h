@@ -68,7 +68,7 @@ class MultiFrameCodec : public Codec {
     using DecodeCallback =
         std::function<void(std::optional<SkBitmap>, std::string)>;
 
-    void DecodeImage(const fml::RefPtr<fml::TaskRunner>& io_task_runner,
+    void DecodeNextFrame(const fml::RefPtr<fml::TaskRunner>& io_task_runner,
                      DecodeCallback callback);
 
     void GetNextFrameAndInvokeCallback(
