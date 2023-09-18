@@ -134,6 +134,13 @@ Dart_Handle MultiFrameCodec::getNextFrame(Dart_Handle callback_handle) {
 
   const auto& task_runners = dart_state->GetTaskRunners();
   auto image_decoder = dart_state->GetImageDecoder();
+
+  if (!image_decoder) {
+    return tonic::ToDart(
+        "Failed to access the internal image decoder "
+        "registry on this isolate. Please file a bug on "
+        "https://github.com/flutter/flutter/issues.");
+  }
   FML_LOG(ERROR) << "cplx 1";
   if (state_->frameCount_ == 0) {
     std::string decode_error("Could not provide any frame.");
