@@ -141,7 +141,6 @@ Dart_Handle MultiFrameCodec::getNextFrame(Dart_Handle callback_handle) {
         "registry on this isolate. Please file a bug on "
         "https://github.com/flutter/flutter/issues.");
   }
-  FML_LOG(ERROR) << "cplx 1";
   if (state_->frameCount_ == 0) {
     std::string decode_error("Could not provide any frame.");
     FML_LOG(ERROR) << decode_error;
@@ -155,7 +154,6 @@ Dart_Handle MultiFrameCodec::getNextFrame(Dart_Handle callback_handle) {
     return Dart_Null();
   }
 
-  FML_LOG(ERROR) << "cplx 2";
   image_decoder->DecodeMultiFrame(
       state_,
       fml::MakeCopyable([callback = std::make_unique<DartPersistentValue>(
@@ -166,8 +164,10 @@ Dart_Handle MultiFrameCodec::getNextFrame(Dart_Handle callback_handle) {
                          io_manager = dart_state->GetIOManager()](
                             std::optional<SkBitmap> bitmap,
                             std::string decode_error) mutable {
+        FML_LOG(ERROR) << "cplx 1";
         auto state = weak_state.lock();
         if (!state) {
+          FML_LOG(ERROR) << "cplx 2";
           ui_task_runner->PostTask(fml::MakeCopyable(
               [callback = std::move(callback)]() { callback->Clear(); }));
           return;

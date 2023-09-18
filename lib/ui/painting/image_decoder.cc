@@ -53,7 +53,6 @@ ImageDecoder::ImageDecoder(
 void ImageDecoder::DecodeMultiFrame(
     std::weak_ptr<MultiFrameCodec::State> weak_state,
     MultiFrameImageResult result) {
-  FML_LOG(ERROR) << "cplx 3";
   auto callback_on_io_thread =
       [result = std::move(result), io_task_runner = runners_.GetIOTaskRunner()](
           std::optional<SkBitmap> bitmap, std::string decode_error) mutable {
