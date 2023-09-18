@@ -5,7 +5,8 @@
 #ifndef FLUTTER_LIB_UI_PAINTING_MUTLI_FRAME_CODEC_H_
 #define FLUTTER_LIB_UI_PAINTING_MUTLI_FRAME_CODEC_H_
 
-#include "flutter/fml/thread.h"
+#include "display_list/image/dl_image.h"
+#include "flow/skia_gpu_object.h"
 #include "flutter/lib/ui/painting/codec.h"
 #include "flutter/lib/ui/painting/image_generator.h"
 
@@ -13,11 +14,15 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include "flutter/fml/memory/weak_ptr.h"
+#include "flutter/fml/synchronization/sync_switch.h"
+#include "flutter/impeller/renderer/context.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
 using tonic::DartPersistentValue;
 
 namespace flutter {
-
+class ImageDecoder;
 class MultiFrameCodec : public Codec {
  public:
   explicit MultiFrameCodec(std::shared_ptr<ImageGenerator> generator);
@@ -33,7 +38,6 @@ class MultiFrameCodec : public Codec {
   // |Codec|
   Dart_Handle getNextFrame(Dart_Handle args) override;
 
- private:
   // Captures the state shared between the IO and UI task runners.
   //
   // The state is initialized on the UI task runner when the Dart object is
@@ -69,30 +73,14 @@ class MultiFrameCodec : public Codec {
         const std::shared_ptr<impeller::Context>& impeller_context,
         SkBitmap bitmap) const;
 
-    using DecodeCallback =
-        std::function<void(std::optional<SkBitmap>, std::string)>;
-
-    void DecodeNextFrame(const fml::RefPtr<fml::TaskRunner>& io_task_runner,
-                         DecodeCallback callback);
-
-    void GetNextFrameAndInvokeCallback(
-        const fml::RefPtr<fml::TaskRunner>& ui_task_runner,
-        const fml::RefPtr<fml::TaskRunner>& io_task_runner,
-        fml::WeakPtr<GrDirectContext> resourceContext,
-        fml::RefPtr<flutter::SkiaUnrefQueue> unref_queue,
-        const std::shared_ptr<const fml::SyncSwitch>& gpu_disable_sync_switch,
-        const std::shared_ptr<impeller::Context>& impeller_context,
-        std::unique_ptr<DartPersistentValue> callback);
-
     void OnGetImageAndInvokeCallback(
         const fml::RefPtr<fml::TaskRunner>& ui_task_runner,
         sk_sp<DlImage> dl_image,
         std::string decode_error,
         std::unique_ptr<DartPersistentValue> callback);
-
-    fml::Thread decoder_thread_{"decode_thread"};
   };
 
+ private:
   // Shared across the UI and IO task runners.
   std::shared_ptr<State> state_;
 
